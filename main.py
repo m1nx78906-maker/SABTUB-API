@@ -5,7 +5,7 @@ import yt_dlp
 
 app = FastAPI(title="SabTube Ultimate Video Extractor")
 
-# সব ধরনের ওয়েবসাইট ও অ্যাপ থেকে রিকোয়েস্ট অ্যালাউ করা
+# সব ওয়েবসাইট ও অ্যাপ থেকে রিকোয়েস্ট অ্যালাউ করা
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -55,7 +55,6 @@ def extract_video_info(request: VideoRequest):
 
             # মূল ইনফরমেশন (টাইটেল, ডেসক্রিপশন, থাম্বনেইল)
             title = info.get('title', 'SabTube Video')
-            # ডেসক্রিপশন অনেক বড় হলে প্রথম ৫০০ অক্ষর নেবে
             raw_description = info.get('description') or 'No description available.'
             description = raw_description[:500] + ('...' if len(raw_description) > 500 else '')
             thumbnail = info.get('thumbnail')
@@ -65,10 +64,9 @@ def extract_video_info(request: VideoRequest):
             audio_data = None
             video_options = {}
 
-            # ১. সেরা কোয়ালিটির অডিও এক্সট্র্যাক্ট করা
+            # ১. সেরা কোয়ালিটির অডিও এক্সট্র্যাক্ট করা (শুধুমাত্র অডিও)
             for f in formats_raw:
                 if f.get('vcodec') == 'none' and f.get('acodec') != 'none':
-                    # যদি আগের থেকে ভালো বিটরেট পাওয়া যায়, তবে আপডেট করবে
                     current_bitrate = f.get('abr') or 0
                     saved_bitrate = int(audio_data['bitrate'].replace('kbps', '')) if audio_data else 0
                     
@@ -81,16 +79,16 @@ def extract_video_info(request: VideoRequest):
                             "size": format_size(f.get('filesize') or f.get('filesize_approx'))
                         }
 
-            # ২. ভিডিও এক্সট্র্যাক্ট করা (Reels, TikTok, YouTube সব সাপোর্ট করবে)
+            # ২. ভিডিও এক্সট্র্যাক্ট করা (শুধুমাত্র সাউন্ডসহ ভিডিও ফিল্টার করবে)
             for f in formats_raw:
-                if f.get('vcodec') != 'none':
-                    # ভার্টিক্যাল (রিলস) এবং হরাইজোন্টাল ভিডিওর সাইজ বোঝার লজিক
+                # 🟢 প্রধান শর্ত: ভিডিও থাকতে হবে (vcodec != none) এবং অডিও-ও থাকতে হবে (acodec != none)
+                if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                    
                     height = f.get('height') or 0
                     width = f.get('width') or 0
-                    res_value = max(height, width) # যেটা বড় সেটাই রেজ্যুলেশন হিসেবে ধরবে
+                    res_value = max(height, width) # যেটা বড় সেটাই রেজ্যুলেশন (রিলস সাপোর্ট)
 
                     if res_value >= 144: # খুব বাজে কোয়ালিটি বাদ দেওয়া হলো
-                        # SD, HD, FHD ক্যাটাগরি তৈরি
                         if res_value >= 1080:
                             category = "FHD"
                         elif res_value >= 720:
@@ -100,15 +98,15 @@ def extract_video_info(request: VideoRequest):
                         
                         res_key = f"{res_value}p"
 
-                        # একই রেজ্যুলেশনের ভিডিও আগে না থাকলে বা নতুনটাতে অডিও থাকলে সেটা নেবে
-                        if res_key not in video_options or (f.get('acodec') != 'none' and not video_options[res_key]['has_audio']):
+                        # একই রেজ্যুলেশনের ভিডিও আগে না থাকলে সেভ করবে
+                        if res_key not in video_options:
                             video_options[res_key] = {
                                 "quality": res_key,
                                 "category": category,
                                 "url": f.get('url'),
                                 "ext": f.get('ext', 'mp4'),
                                 "size": format_size(f.get('filesize') or f.get('filesize_approx')),
-                                "has_audio": f.get('acodec') != 'none'
+                                "has_audio": True # সব ভিডিওতে সাউন্ড গ্যারান্টিড
                             }
 
             # ভিডিওগুলোকে রেজ্যুলেশন অনুযায়ী ছোট থেকে বড়তে সাজানো
@@ -126,5 +124,4 @@ def extract_video_info(request: VideoRequest):
 
     except Exception as e:
         error_msg = str(e)
-        # যদি ইউটিউব বা ফেসবুক ব্লক করে, তবে সেই মেসেজটি সুন্দর করে পাঠাবে
         raise HTTPException(status_code=400, detail=f"ভিডিও প্রসেস করা সম্ভব হয়নি। লিংকটি সঠিক কিনা চেক করুন। Error: {error_msg}")
